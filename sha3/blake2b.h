@@ -1,86 +1,125 @@
-/*
-   BLAKE2 reference source code package - reference C implementations
-
-   Written in 2012 by Samuel Neves <sneves@dei.uc.pt>
-
-   To the extent possible under law, the author(s) have dedicated all copyright
-   and related and neighboring rights to this software to the public domain
-   worldwide. This software is distributed without any warranty.
-
-   You should have received a copy of the CC0 Public Domain Dedication along with
-   this software. If not, see <http://creativecommons.org/publicdomain/zero/1.0/>.
-*/
-
+/**
+ * BLAKE2 reference source code package - reference C implementations
+ *
+ * Written in 2012 by Samuel Neves <sneves@dei.uc.pt>
+ *
+ * To the extent possible under law, the author(s) have dedicated all copyright
+ * and related and neighboring rights to this software to the public domain
+ * worldwide. This software is distributed without any warranty.
+ *
+ * You should have received a copy of the CC0 Public Domain Dedication along with
+ * this software. If not, see <http://creativecommons.org/publicdomain/zero/1.0/>.
+ */
+#pragma once
 #ifndef __BLAKE2_H__
 #define __BLAKE2_H__
 
 #include <stddef.h>
 #include <stdint.h>
 
-#include "crypto_generichash_blake2b.h"
-
-#define blake2b_init_param crypto_generichash_blake2b__init_param
-#define blake2b_init       crypto_generichash_blake2b__init
-#define blake2b_init_key   crypto_generichash_blake2b__init_key
-#define blake2b_update     crypto_generichash_blake2b__update
-#define blake2b_final      crypto_generichash_blake2b__final
-#define blake2b            crypto_generichash_blake2b__blake2b
-
 #if defined(_MSC_VER)
+#include <inttypes.h>
+#define inline __inline
 #define ALIGN(x) __declspec(align(x))
 #else
 #define ALIGN(x) __attribute__((aligned(x)))
 #endif
 
-#if defined(__cplusplus)
-extern "C" {
+#if defined(_MSC_VER) || defined(__x86_64__) || defined(__x86__)
+#define NATIVE_LITTLE_ENDIAN
 #endif
 
-  enum blake2s_constant
-  {
-    BLAKE2S_BLOCKBYTES = 64,
-    BLAKE2S_OUTBYTES   = 32,
-    BLAKE2S_KEYBYTES   = 32,
-    BLAKE2S_SALTBYTES  = 8,
-    BLAKE2S_PERSONALBYTES = 8
-  };
+/* blake2-impl.h */
 
-  enum blake2b_constant
+static inline uint64_t load64(const void *src)
+{
+#if defined(NATIVE_LITTLE_ENDIAN)
+	uint64_t w;
+	memcpy(&w, src, sizeof w);
+	return w;
+#else
+	const uint8_t *p = (const uint8_t *)src;
+	uint64_t w = *p++;
+	w |= (uint64_t)(*p++) << 8;
+	w |= (uint64_t)(*p++) << 16;
+	w |= (uint64_t)(*p++) << 24;
+	w |= (uint64_t)(*p++) << 32;
+	w |= (uint64_t)(*p++) << 40;
+	w |= (uint64_t)(*p++) << 48;
+	w |= (uint64_t)(*p++) << 56;
+	return w;
+#endif
+}
+
+static inline void store64(void *dst, uint64_t w)
+{
+#if defined(NATIVE_LITTLE_ENDIAN)
+	memcpy(dst, &w, sizeof w);
+#else
+	uint8_t *p = (uint8_t *)dst;
+	*p++ = (uint8_t)w;
+	w >>= 8;
+	*p++ = (uint8_t)w;
+	w >>= 8;
+	*p++ = (uint8_t)w;
+	w >>= 8;
+	*p++ = (uint8_t)w;
+	w >>= 8;
+	*p++ = (uint8_t)w;
+	w >>= 8;
+	*p++ = (uint8_t)w;
+	w >>= 8;
+	*p++ = (uint8_t)w;
+	w >>= 8;
+	*p++ = (uint8_t)w;
+#endif
+}
+
+static inline uint64_t load48(const void *src)
+{
+	const uint8_t *p = (const uint8_t *)src;
+	uint64_t w = *p++;
+	w |= (uint64_t)(*p++) << 8;
+	w |= (uint64_t)(*p++) << 16;
+	w |= (uint64_t)(*p++) << 24;
+	w |= (uint64_t)(*p++) << 32;
+	w |= (uint64_t)(*p++) << 40;
+	return w;
+}
+
+static inline void store48(void *dst, uint64_t w)
+{
+	uint8_t *p = (uint8_t *)dst;
+	*p++ = (uint8_t)w; w >>= 8;
+	*p++ = (uint8_t)w; w >>= 8;
+	*p++ = (uint8_t)w; w >>= 8;
+	*p++ = (uint8_t)w; w >>= 8;
+	*p++ = (uint8_t)w; w >>= 8;
+	*p++ = (uint8_t)w;
+}
+
+/* prevents compiler optimizing out memset() */
+static inline void secure_zero_memory(void *v, size_t n)
+{
+	volatile uint8_t *p = ( volatile uint8_t * )v;
+
+	while( n-- ) *p++ = 0;
+}
+
+/* blake2.h */
+
+enum blake2b_constant
   {
     BLAKE2B_BLOCKBYTES = 128,
     BLAKE2B_OUTBYTES   = 64,
     BLAKE2B_KEYBYTES   = 64,
     BLAKE2B_SALTBYTES  = 16,
     BLAKE2B_PERSONALBYTES = 16
-  };
+};
+
 
 #pragma pack(push, 1)
-  typedef struct __blake2s_param
-  {
-    uint8_t  digest_length; // 1
-    uint8_t  key_length;    // 2
-    uint8_t  fanout;        // 3
-    uint8_t  depth;         // 4
-    uint32_t leaf_length;   // 8
-    uint8_t  node_offset[6];// 14
-    uint8_t  node_depth;    // 15
-    uint8_t  inner_length;  // 16
-    // uint8_t  reserved[0];
-    uint8_t  salt[BLAKE2S_SALTBYTES]; // 24
-    uint8_t  personal[BLAKE2S_PERSONALBYTES];  // 32
-  } blake2s_param;
-
-  ALIGN( 64 ) typedef struct __blake2s_state
-  {
-    uint32_t h[8];
-    uint32_t t[2];
-    uint32_t f[2];
-    uint8_t  buf[2 * BLAKE2S_BLOCKBYTES];
-    size_t   buflen;
-    uint8_t  last_node;
-  } blake2s_state ;
-
-  typedef struct __blake2b_param
+typedef struct __blake2b_param
   {
     uint8_t  digest_length; // 1
     uint8_t  key_length;    // 2
@@ -95,10 +134,8 @@ extern "C" {
     uint8_t  personal[BLAKE2B_PERSONALBYTES];  // 64
   } blake2b_param;
 
-#ifndef DEFINE_BLAKE2B_STATE
-typedef crypto_generichash_blake2b_state blake2b_state;
-#else
-  ALIGN( 64 ) typedef struct __blake2b_state
+
+ALIGN( 64 ) typedef struct __blake2b_state
   {
     uint64_t h[8];
     uint64_t t[2];
@@ -106,64 +143,31 @@ typedef crypto_generichash_blake2b_state blake2b_state;
     uint8_t  buf[2 * BLAKE2B_BLOCKBYTES];
     size_t   buflen;
     uint8_t  last_node;
-  } blake2b_state;
-#endif
-
-  typedef struct __blake2sp_state
-  {
-    blake2s_state S[8][1];
-    blake2s_state R[1];
-    uint8_t buf[8 * BLAKE2S_BLOCKBYTES];
-    size_t  buflen;
-  } blake2sp_state;
-
-  typedef struct __blake2bp_state
-  {
-    blake2b_state S[4][1];
-    blake2b_state R[1];
-    uint8_t buf[4 * BLAKE2B_BLOCKBYTES];
-    size_t  buflen;
-  } blake2bp_state;
+} blake2b_state;
 #pragma pack(pop)
 
-  // Streaming API
-  int blake2s_init( blake2s_state *S, const uint8_t outlen );
-  int blake2s_init_key( blake2s_state *S, const uint8_t outlen, const void *key, const uint8_t keylen );
-  int blake2s_init_param( blake2s_state *S, const blake2s_param *P );
-  int blake2s_update( blake2s_state *S, const uint8_t *in, uint64_t inlen );
-  int blake2s_final( blake2s_state *S, uint8_t *out, uint8_t outlen );
+#if defined(__cplusplus)
+extern "C" {
+#endif
 
+	int blake2b_compress( blake2b_state *S, const uint8_t block[BLAKE2B_BLOCKBYTES] );
+
+	// Streaming API
   int blake2b_init( blake2b_state *S, const uint8_t outlen );
   int blake2b_init_key( blake2b_state *S, const uint8_t outlen, const void *key, const uint8_t keylen );
   int blake2b_init_param( blake2b_state *S, const blake2b_param *P );
   int blake2b_update( blake2b_state *S, const uint8_t *in, uint64_t inlen );
   int blake2b_final( blake2b_state *S, uint8_t *out, uint8_t outlen );
 
-  int blake2sp_init( blake2sp_state *S, const uint8_t outlen );
-  int blake2sp_init_key( blake2sp_state *S, const uint8_t outlen, const void *key, const uint8_t keylen );
-  int blake2sp_update( blake2sp_state *S, const uint8_t *in, uint64_t inlen );
-  int blake2sp_final( blake2sp_state *S, uint8_t *out, uint8_t outlen );
+	// Simple API
+	int blake2b( uint8_t *out, const void *in, const void *key, const uint8_t outlen, const uint64_t inlen, uint8_t keylen );
 
-  int blake2bp_init( blake2bp_state *S, const uint8_t outlen );
-  int blake2bp_init_key( blake2bp_state *S, const uint8_t outlen, const void *key, const uint8_t keylen );
-  int blake2bp_update( blake2bp_state *S, const uint8_t *in, uint64_t inlen );
-  int blake2bp_final( blake2bp_state *S, uint8_t *out, uint8_t outlen );
-
-  // Simple API
-  int blake2s( uint8_t *out, const void *in, const void *key, const uint8_t outlen, const uint64_t inlen, uint8_t keylen );
-  int blake2b( uint8_t *out, const void *in, const void *key, const uint8_t outlen, const uint64_t inlen, uint8_t keylen );
-
-  int blake2sp( uint8_t *out, const void *in, const void *key, const uint8_t outlen, const uint64_t inlen, uint8_t keylen );
-  int blake2bp( uint8_t *out, const void *in, const void *key, const uint8_t outlen, const uint64_t inlen, uint8_t keylen );
-
-  static inline int blake2( uint8_t *out, const void *in, const void *key, const uint8_t outlen, const uint64_t inlen, uint8_t keylen )
-  {
-    return blake2b( out, in, key, outlen, inlen, keylen );
-  }
+	// Direct Hash Mining Helpers
+	#define blake2s_salt32(out, in, inlen, key32) blake2s(out, in, key32, 32, inlen, 32) /* neoscrypt */
+	#define blake2s_simple(out, in, inlen) blake2s(out, in, NULL, 32, inlen, 0)
 
 #if defined(__cplusplus)
 }
 #endif
 
 #endif
-
